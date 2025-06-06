@@ -1,23 +1,23 @@
-const { createFlickr } = require('flickr-sdk');
+const Flickr = require('flickr-sdk');
 const { tmpdir } = require('os');
 const { join, parse } = require('path');
 const { writeFile, unlink } = require('fs/promises');
 
-// Initialize Flickr SDK with CORRECT environment variable names
-let flickr, upload, isConfigured = false;
+// Initialize Flickr SDK v3.10.0 style
+let flickr, isConfigured = false;
 
 try {
   if (process.env.FLICKR_API_KEY && process.env.FLICKR_API_SECRET) {
-    const { flickr: flickrClient, upload: uploadClient } = createFlickr({
-      consumerKey: process.env.FLICKR_API_KEY,
-      consumerSecret: process.env.FLICKR_API_SECRET,
-      oauthToken: process.env.FLICKR_ACCESS_TOKEN,
-      oauthTokenSecret: process.env.FLICKR_ACCESS_TOKEN_SECRET,  // Fixed variable name!
-    });
+    // v3.10.0 uses OAuth plugin
+    flickr = new Flickr(Flickr.OAuth.createPlugin(
+      process.env.FLICKR_API_KEY,
+      process.env.FLICKR_API_SECRET,
+      process.env.FLICKR_ACCESS_TOKEN,
+      process.env.FLICKR_ACCESS_TOKEN_SECRET
+    ));
     
-    flickr = flickrClient;
-    upload = uploadClient;
     isConfigured = true;
+    console.log('Flickr SDK v3.10.0 initialized');
   }
 } catch (error) {
   console.error('Flickr SDK initialization failed:', error);
@@ -27,13 +27,13 @@ const userId = process.env.FLICKR_USER_ID;
 
 async function getAlbums() {
   try {
-    const res = await flickr("flickr.photosets.getList", { user_id: userId });
+    const res = await flickr.photosets.getList({ user_id: userId });
     
-    if (!res.photosets || !res.photosets.photoset) {
+    if (!res.body.photosets || !res.body.photosets.photoset) {
       return [];
     }
     
-    return res.photosets.photoset.map((set) => ({
+    return res.body.photosets.photoset.map((set) => ({
       id: set.id,
       title: set.title._content,
     }));
@@ -53,12 +53,12 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
   }
 
   console.log('Creating new album:', albumTitle);
-  const res = await flickr("flickr.photosets.create", {
+  const res = await flickr.photosets.create({
     title: albumTitle,
     primary_photo_id: primaryPhotoId,
   });
 
-  return res.photoset.id;
+  return res.body.photoset.id;
 }
 
 async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
@@ -75,14 +75,18 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     tempFilePath = join(tmpdir(), fileName);
     await writeFile(tempFilePath, buffer);
 
-    // Upload photo as private
-    const photoId = await upload(tempFilePath, { 
-      title,
+    // Upload photo as private using v3.10.0 upload method
+    const uploadRes = await flickr.upload({
+      photo: tempFilePath,
+      title: title,
       is_public: 0,
       is_friend: 0,
       is_family: 0,
       hidden: 2
     });
+    
+    const photoId = uploadRes.body.photoid._content;
+    console.log('Photo uploaded with ID:', photoId);
     
     const albumId = await findOrCreateAlbum(albumTitle, photoId);
 
@@ -92,10 +96,11 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     
     if (albumExisted) {
       try {
-        await flickr("flickr.photosets.addPhoto", {
+        await flickr.photosets.addPhoto({
           photoset_id: albumId,
           photo_id: photoId,
         });
+        console.log('Photo added to existing album');
       } catch (addError) {
         console.log('Could not add photo to album:', addError.message);
       }
@@ -127,14 +132,15 @@ module.exports = async (req, res) => {
   if (req.method === 'GET') {
     return res.status(200).json({
       status: '🎉 FLICKR UPLOADER LIVE!',
-      message: 'Production Flickr Photo Uploader - Fully Configured',
+      message: 'Production Flickr Photo Uploader - v3.10.0',
       service: 'Flickr Photo Uploader',
       version: '1.0.0',
-      configured: '✅ READY',
+      configured: isConfigured ? '✅ READY' : '❌ NOT CONFIGURED',
+      sdk: 'flickr-sdk v3.10.0',
       features: [
         '📸 Private photo uploads',
         '📁 Smart album management with duplicate prevention',
-        '🔒 Following official flickr-sdk patterns',
+        '🔒 Using stable flickr-sdk v3.10.0',
         '⚡ Optimized for Make.com integration'
       ],
       endpoints: {
@@ -146,6 +152,12 @@ module.exports = async (req, res) => {
   }
 
   if (req.method === 'POST') {
+    if (!isConfigured) {
+      return res.status(500).json({
+        error: 'Flickr API not configured. Add environment variables.'
+      });
+    }
+
     try {
       const { imageUrl, dropboxUrl, albumPath } = req.body;
       const sourceUrl = dropboxUrl || imageUrl;
