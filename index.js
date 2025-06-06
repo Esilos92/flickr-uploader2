@@ -427,4 +427,4 @@ module.exports = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-}
+};
