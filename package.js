@@ -2,9 +2,9 @@
   "name": "flickr-photo-uploader",
   "version": "1.0.0",
   "description": "Production-ready Flickr photo uploader with rate limiting, error handling, and privacy controls",
-  "main": "api/index.js",
+  "main": "index.js",
   "engines": {
-    "node": "18.x"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node api/index.js",
