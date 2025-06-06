@@ -2,12 +2,12 @@
   "name": "flickr-photo-uploader",
   "version": "1.0.0",
   "description": "Production-ready Flickr photo uploader with rate limiting, error handling, and privacy controls",
-  "main": "index.js",
+  "main": "api/index.js",
   "engines": {
-    "node": "18.x"
+    "node": "22.x"
   },
   "scripts": {
-    "start": "node index.js",
+    "start": "node api/index.js",
     "test": "echo \"Add tests here\" && exit 0",
     "dev": "vercel dev",
     "deploy": "vercel --prod"
