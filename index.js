@@ -310,9 +310,21 @@ module.exports = async (req, res) => {
       validateEnvironment();
       
       return res.status(200).json({
-        status: 'healthy',
+        status: '🎉 FLICKR UPLOADER LIVE!',
+        message: 'Production Flickr Photo Uploader Successfully Deployed',
         service: 'Flickr Photo Uploader',
         version: '1.0.0',
+        deployment: 'SUCCESS ✅',
+        features: [
+          '📸 Private photo uploads',
+          '📁 Smart album management', 
+          '🔒 Rate limiting & retry logic',
+          '⚡ Optimized for Make.com'
+        ],
+        endpoints: {
+          health: 'GET /',
+          upload: 'POST /upload'
+        },
         timestamp: new Date().toISOString(),
         rateLimit: {
           remaining: Math.max(0, RATE_LIMIT.maxRequests - RATE_LIMIT.requests.length),
@@ -322,9 +334,11 @@ module.exports = async (req, res) => {
       });
     } catch (error) {
       return res.status(500).json({
-        status: 'unhealthy',
+        status: '⚠️ DEPLOYED BUT NOT CONFIGURED',
+        message: 'App deployed successfully but missing environment variables',
         error: error.message,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        action: 'Add Flickr API credentials to Vercel environment variables'
       });
     }
   }
