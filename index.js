@@ -286,8 +286,8 @@ function validateEnvironment() {
   }
 }
 
-// Main handler
-module.exports = async (req, res) => {
+// Main handler for API route
+export default async function handler(req, res) {
   // Set security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -323,8 +323,8 @@ module.exports = async (req, res) => {
           '⚡ Optimized for Make.com'
         ],
         endpoints: {
-          health: 'GET /',
-          upload: 'POST /upload'
+          health: 'GET /api',
+          upload: 'POST /api'
         },
         timestamp: new Date().toISOString(),
         rateLimit: {
@@ -453,4 +453,4 @@ module.exports = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-};
+}
