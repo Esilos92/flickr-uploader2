@@ -4,13 +4,13 @@
   "description": "Flickr photo uploader",
   "main": "api/index.js",
   "engines": {
-    "node": "22.x"
+    "node": "18.x"
   },
   "scripts": {
     "start": "node api/index.js"
   },
   "dependencies": {
-    "flickr-sdk": "7.0.0-beta.9"
+    "flickr-sdk": "^6.0.0"
   },
   "license": "MIT"
 }
