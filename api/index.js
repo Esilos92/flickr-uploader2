@@ -3,12 +3,12 @@ const { tmpdir } = require('os');
 const { join, parse } = require('path');
 const { writeFile, unlink } = require('fs/promises');
 
-// Initialize Flickr SDK following the official documentation
+// Initialize Flickr SDK following EXACT official quickstart pattern
 let flickr, upload, isConfigured = false;
 
 try {
   if (process.env.FLICKR_API_KEY && process.env.FLICKR_API_SECRET) {
-    // Create Flickr instance using the SDK pattern from npmjs.com/package/flickr-sdk
+    // OAuth 1.0 method - EXACT pattern from official docs
     const { flickr: flickrClient, upload: uploadClient } = createFlickr({
       consumerKey: process.env.FLICKR_API_KEY,
       consumerSecret: process.env.FLICKR_API_SECRET,
@@ -19,7 +19,7 @@ try {
     flickr = flickrClient;
     upload = uploadClient;
     isConfigured = true;
-    console.log('Flickr SDK initialized successfully');
+    console.log('Flickr SDK initialized with OAuth 1.0');
   }
 } catch (error) {
   console.error('Flickr SDK initialization failed:', error);
@@ -47,7 +47,7 @@ function checkRateLimit() {
   RATE_LIMIT.requests.push(now);
 }
 
-// Retry logic for API reliability per Flickr best practices
+// Retry logic for API reliability
 async function retryWithBackoff(operation, maxAttempts = 3) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -71,13 +71,14 @@ async function retryWithBackoff(operation, maxAttempts = 3) {
   }
 }
 
-// Get albums using flickr.photosets.getList API method
+// Get albums - following official API call pattern
 async function getAlbums() {
   try {
     checkRateLimit();
     
+    // EXACT pattern: await flickr("method.name", { params })
     const res = await retryWithBackoff(async () => {
-      return await flickr('flickr.photosets.getList', { 
+      return await flickr("flickr.photosets.getList", { 
         user_id: userId 
       });
     });
@@ -116,9 +117,9 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
     
     checkRateLimit();
     
-    // Use flickr.photosets.create API method
+    // EXACT pattern: await flickr("method.name", { params })
     const res = await retryWithBackoff(async () => {
-      return await flickr('flickr.photosets.create', {
+      return await flickr("flickr.photosets.create", {
         title: albumTitle,
         primary_photo_id: primaryPhotoId,
         description: `Private album: ${albumTitle}`,
@@ -134,7 +135,7 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
   }
 }
 
-// Photo upload following Flickr SDK upload pattern
+// Photo upload following EXACT official upload pattern
 async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
   let tempFilePath = null;
   
@@ -179,7 +180,7 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     
     console.log(`File saved temporarily: ${tempFilePath} (${buffer.length} bytes)`);
 
-    // Upload using Flickr SDK upload method with privacy settings
+    // Upload using EXACT official pattern: await upload(filePath, options)
     console.log(`Uploading photo: "${title}"`);
     
     const photoId = await retryWithBackoff(async () => {
@@ -198,7 +199,7 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     // Handle album assignment
     const albumId = await findOrCreateAlbum(albumTitle, photoId);
     
-    // Add to existing album using flickr.photosets.addPhoto
+    // Add to existing album using official API call pattern
     const albums = await getAlbums();
     const albumExisted = albums.some(a => a.id === albumId);
     
@@ -206,8 +207,9 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
       try {
         checkRateLimit();
         
+        // EXACT pattern: await flickr("method.name", { params })
         await retryWithBackoff(async () => {
-          return await flickr('flickr.photosets.addPhoto', {
+          return await flickr("flickr.photosets.addPhoto", {
             photoset_id: albumId,
             photo_id: photoId,
           });
@@ -288,13 +290,24 @@ module.exports = async (req, res) => {
       
       return res.status(200).json({
         status: '🎉 FLICKR UPLOADER LIVE!',
-        message: 'Production Flickr Photo Uploader - Fully Configured',
+        message: 'Following Official flickr-sdk Documentation',
         service: 'Flickr Photo Uploader',
         version: '1.0.0',
         deployment: 'SUCCESS ✅',
         configured: '✅ READY',
+        implementation: {
+          sdk: 'flickr-sdk v7.0.0-beta.9',
+          pattern: 'Official Quickstart',
+          auth: 'OAuth 1.0',
+          methods: [
+            'flickr("flickr.photosets.getList", params)',
+            'flickr("flickr.photosets.create", params)', 
+            'flickr("flickr.photosets.addPhoto", params)',
+            'upload(filePath, options)'
+          ]
+        },
         features: [
-          '📸 Private photo uploads via Flickr API',
+          '📸 Private photo uploads via official upload() method',
           '📁 Smart album management with duplicate prevention', 
           '🔒 Rate limiting (3600 requests/hour)',
           '⚡ Optimized for Make.com integration',
@@ -303,11 +316,6 @@ module.exports = async (req, res) => {
         endpoints: {
           health: 'GET /api',
           upload: 'POST /api'
-        },
-        flickrApi: {
-          sdk: 'flickr-sdk v7.0.0-beta.9',
-          methods: ['photosets.getList', 'photosets.create', 'photosets.addPhoto', 'upload'],
-          rateLimit: '3600 requests/hour'
         },
         timestamp: new Date().toISOString(),
         rateLimit: {
@@ -328,16 +336,16 @@ module.exports = async (req, res) => {
         timestamp: new Date().toISOString(),
         action: 'Add Flickr API credentials to Vercel environment variables',
         needed: [
-          'FLICKR_API_KEY (from Flickr App)',
-          'FLICKR_API_SECRET (from Flickr App)',
-          'FLICKR_ACCESS_TOKEN (OAuth token)', 
-          'FLICKR_ACCESS_SECRET (OAuth token secret)',
+          'FLICKR_API_KEY (your API key)',
+          'FLICKR_API_SECRET (your API secret)',
+          'FLICKR_ACCESS_TOKEN (oauth token)', 
+          'FLICKR_ACCESS_SECRET (oauth token secret)',
           'FLICKR_USER_ID (your Flickr user ID)'
         ],
         setup: {
           flickrApp: 'https://www.flickr.com/services/apps/create/',
-          apiDocs: 'https://www.flickr.com/services/api/',
-          sdkDocs: 'https://www.npmjs.com/package/flickr-sdk'
+          oauth: 'https://www.flickr.com/services/api/auth.oauth.html',
+          quickstart: 'https://www.npmjs.com/package/flickr-sdk'
         }
       });
     }
@@ -394,7 +402,7 @@ module.exports = async (req, res) => {
       
       console.log(`Processing upload: ${photoTitle} -> ${albumTitle}`);
 
-      // Perform Flickr upload
+      // Perform Flickr upload using official patterns
       const result = await uploadPhotoFromUrl(sourceUrl, photoTitle, albumTitle);
       
       const duration = Date.now() - startTime;
