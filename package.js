@@ -7,7 +7,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "start": "node api/index.js",
+    "start": "node index.js",
     "test": "echo \"Add tests here\" && exit 0",
     "dev": "vercel dev",
     "deploy": "vercel --prod"
