@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Production-ready Flickr photo uploader with rate limiting, error handling, and privacy controls",
   "main": "index.js",
+  "type": "module",
   "engines": {
     "node": "22.x"
   },
@@ -13,6 +14,8 @@
     "deploy": "vercel --prod"
   },
   "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
     "flickr-sdk": "^7.0.0-beta.9"
   },
   "keywords": [
@@ -26,13 +29,5 @@
     "dropbox"
   ],
   "author": "Your Name",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/flickr-uploader.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/flickr-uploader/issues"
-  },
-  "homepage": "https://github.com/yourusername/flickr-uploader#readme"
+  "license": "MIT"
 }
