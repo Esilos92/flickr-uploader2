@@ -4,7 +4,7 @@
   "description": "Production-ready Flickr photo uploader with rate limiting, error handling, and privacy controls",
   "main": "api/index.js",
   "engines": {
-    "node": "22.x"
+    "node": "18.x"
   },
   "scripts": {
     "start": "node api/index.js",
