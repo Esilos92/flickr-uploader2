@@ -6,7 +6,7 @@ import { join, parse } from "path";
 import { writeFile } from "fs/promises";
 import { unlink } from "fs/promises";
 
-// Flickr credentials (replace with your actual secrets)
+// Flickr credentials
 const { flickr, upload } = createFlickr({
   consumerKey: process.env.FLICKR_API_KEY,
   consumerSecret: process.env.FLICKR_API_SECRET,
@@ -144,4 +144,5 @@ app.post("/upload", uploadMiddleware.none(), async (req, res) => {
   }
 });
 
+// Export for Vercel serverless function
 export default app;
