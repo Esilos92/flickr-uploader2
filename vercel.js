@@ -1,14 +1,13 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "index.js",
-      "use": "@vercel/node"
+  "functions": {
+    "*.js": {
+      "runtime": "nodejs22.x"
     }
-  ],
+  },
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/",
       "dest": "/index.js"
     }
   ]
