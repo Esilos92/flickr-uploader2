@@ -10,7 +10,7 @@
     "start": "node api/index.js"
   },
   "dependencies": {
-    "flickr-sdk": "^6.0.0"
+    "flickr-sdk": "3.10.0"
   },
   "license": "MIT"
 }
