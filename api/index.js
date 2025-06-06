@@ -3,46 +3,51 @@ const { tmpdir } = require('os');
 const { join, parse } = require('path');
 const { writeFile, unlink } = require('fs/promises');
 
-// Flickr SDK initialization with error handling
-let flickr, upload;
+// Initialize Flickr SDK following the official documentation
+let flickr, upload, isConfigured = false;
+
 try {
-  const flickrSDK = createFlickr({
-    consumerKey: process.env.FLICKR_API_KEY,
-    consumerSecret: process.env.FLICKR_API_SECRET,
-    oauthToken: process.env.FLICKR_ACCESS_TOKEN,
-    oauthTokenSecret: process.env.FLICKR_ACCESS_SECRET,
-  });
-  flickr = flickrSDK.flickr;
-  upload = flickrSDK.upload;
+  if (process.env.FLICKR_API_KEY && process.env.FLICKR_API_SECRET) {
+    // Create Flickr instance using the SDK pattern from npmjs.com/package/flickr-sdk
+    const { flickr: flickrClient, upload: uploadClient } = createFlickr({
+      consumerKey: process.env.FLICKR_API_KEY,
+      consumerSecret: process.env.FLICKR_API_SECRET,
+      oauthToken: process.env.FLICKR_ACCESS_TOKEN,
+      oauthTokenSecret: process.env.FLICKR_ACCESS_SECRET,
+    });
+    
+    flickr = flickrClient;
+    upload = uploadClient;
+    isConfigured = true;
+    console.log('Flickr SDK initialized successfully');
+  }
 } catch (error) {
-  console.error('Failed to initialize Flickr SDK:', error);
+  console.error('Flickr SDK initialization failed:', error);
 }
 
 const userId = process.env.FLICKR_USER_ID;
 
-// Rate limiting: Flickr allows 3600 queries per hour
+// Rate limiting per Flickr API docs: 3600 queries per hour
 const RATE_LIMIT = {
   maxRequests: 3600,
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 60 * 60 * 1000,
   requests: [],
 };
 
-// Check rate limit compliance
 function checkRateLimit() {
   const now = Date.now();
   const windowStart = now - RATE_LIMIT.windowMs;
   
-  // Remove old requests outside the window
   RATE_LIMIT.requests = RATE_LIMIT.requests.filter(time => time > windowStart);
   
   if (RATE_LIMIT.requests.length >= RATE_LIMIT.maxRequests) {
-    throw new Error('Rate limit exceeded. Please wait before making more requests.');
+    throw new Error('Rate limit exceeded. Flickr allows 3600 requests per hour.');
   }
   
   RATE_LIMIT.requests.push(now);
 }
 
-// Exponential backoff retry logic
+// Retry logic for API reliability per Flickr best practices
 async function retryWithBackoff(operation, maxAttempts = 3) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -50,7 +55,6 @@ async function retryWithBackoff(operation, maxAttempts = 3) {
     } catch (error) {
       console.error(`Attempt ${attempt} failed:`, error.message);
       
-      // Don't retry on certain errors
       if (error.message.includes('Invalid OAuth') || 
           error.message.includes('Invalid API key') ||
           error.message.includes('Permission denied')) {
@@ -61,57 +65,39 @@ async function retryWithBackoff(operation, maxAttempts = 3) {
         throw new Error(`Operation failed after ${maxAttempts} attempts: ${error.message}`);
       }
       
-      // Exponential backoff with jitter
-      const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
-      const jitter = Math.random() * 1000;
-      const delay = baseDelay + jitter;
-      
-      console.log(`Retrying in ${Math.round(delay)}ms...`);
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
 }
 
-// Get albums with caching to reduce API calls
-let albumsCache = null;
-let albumsCacheTime = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-async function getAlbums(forceRefresh = false) {
-  const now = Date.now();
-  
-  if (!forceRefresh && albumsCache && (now - albumsCacheTime < CACHE_DURATION)) {
-    return albumsCache;
-  }
-  
+// Get albums using flickr.photosets.getList API method
+async function getAlbums() {
   try {
     checkRateLimit();
     
     const res = await retryWithBackoff(async () => {
-      return await flickr('flickr.photosets.getList', { user_id: userId });
+      return await flickr('flickr.photosets.getList', { 
+        user_id: userId 
+      });
     });
     
     if (!res.photosets || !res.photosets.photoset) {
-      albumsCache = [];
-    } else {
-      albumsCache = res.photosets.photoset.map((set) => ({
-        id: set.id,
-        title: set.title._content,
-      }));
+      return [];
     }
     
-    albumsCacheTime = now;
-    console.log(`Retrieved ${albumsCache.length} albums from Flickr`);
-    return albumsCache;
+    return res.photosets.photoset.map((set) => ({
+      id: set.id,
+      title: set.title._content,
+    }));
     
   } catch (error) {
     console.error('Error getting albums:', error);
-    // Return cached data if available, otherwise empty array
-    return albumsCache || [];
+    return [];
   }
 }
 
-// Find or create album with strict duplicate prevention
+// Album management with duplicate prevention
 async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
   try {
     const albums = await getAlbums();
@@ -130,6 +116,7 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
     
     checkRateLimit();
     
+    // Use flickr.photosets.create API method
     const res = await retryWithBackoff(async () => {
       return await flickr('flickr.photosets.create', {
         title: albumTitle,
@@ -138,9 +125,6 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
       });
     });
 
-    // Invalidate cache since we created a new album
-    albumsCache = null;
-    
     console.log(`Created album: "${albumTitle}" (ID: ${res.photoset.id})`);
     return res.photoset.id;
     
@@ -150,22 +134,20 @@ async function findOrCreateAlbum(albumTitle, primaryPhotoId) {
   }
 }
 
-// Upload photo with comprehensive error handling
+// Photo upload following Flickr SDK upload pattern
 async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
   let tempFilePath = null;
   
   try {
-    // Download image with timeout
     console.log(`Downloading image from: ${imageUrl}`);
     
+    // Download with timeout
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    const timeout = setTimeout(() => controller.abort(), 30000);
     
     const response = await fetch(imageUrl, {
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Flickr-Uploader/1.0'
-      }
+      headers: { 'User-Agent': 'Flickr-Uploader/1.0' }
     });
     
     clearTimeout(timeout);
@@ -186,25 +168,25 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
       throw new Error('Downloaded file is empty');
     }
     
-    if (buffer.length > 200 * 1024 * 1024) { // 200MB limit
+    if (buffer.length > 200 * 1024 * 1024) {
       throw new Error('File too large. Maximum size is 200MB.');
     }
 
-    // Prepare file for upload
+    // Save to temp file for upload
     const fileName = title.endsWith('.jpg') ? title : `${title}.jpg`;
     tempFilePath = join(tmpdir(), `flickr_${Date.now()}_${fileName}`);
     await writeFile(tempFilePath, buffer);
     
     console.log(`File saved temporarily: ${tempFilePath} (${buffer.length} bytes)`);
 
-    // Upload photo as private with retry logic
+    // Upload using Flickr SDK upload method with privacy settings
     console.log(`Uploading photo: "${title}"`);
     
     const photoId = await retryWithBackoff(async () => {
       return await upload(tempFilePath, {
         title: title,
         description: `Uploaded via API on ${new Date().toISOString()}`,
-        is_public: 0,  // Private
+        is_public: 0,  // Private per requirements
         is_friend: 0,  // Not visible to friends
         is_family: 0,  // Not visible to family
         hidden: 2,     // Hide from public searches
@@ -213,14 +195,12 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     
     console.log(`Photo uploaded successfully (ID: ${photoId})`);
 
-    // Handle album creation/assignment
+    // Handle album assignment
     const albumId = await findOrCreateAlbum(albumTitle, photoId);
     
-    // Add to album only if it's an existing album
+    // Add to existing album using flickr.photosets.addPhoto
     const albums = await getAlbums();
-    const albumExisted = albums.some(a => 
-      a.id === albumId && a.title.toLowerCase().trim() === albumTitle.toLowerCase().trim()
-    );
+    const albumExisted = albums.some(a => a.id === albumId);
     
     if (albumExisted) {
       try {
@@ -236,7 +216,6 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
         console.log(`Photo added to existing album: ${albumTitle}`);
       } catch (addError) {
         console.warn(`Could not add photo to album: ${addError.message}`);
-        // Don't fail the entire upload for this
       }
     }
 
@@ -253,7 +232,7 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
     console.error('Upload failed:', error);
     throw error;
   } finally {
-    // Always clean up temp file
+    // Clean up temp file
     if (tempFilePath) {
       try {
         await unlink(tempFilePath);
@@ -265,7 +244,7 @@ async function uploadPhotoFromUrl(imageUrl, title, albumTitle) {
   }
 }
 
-// Validate environment variables
+// Environment validation
 function validateEnvironment() {
   const required = [
     'FLICKR_API_KEY',
@@ -281,50 +260,54 @@ function validateEnvironment() {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
   
-  if (!flickr || !upload) {
+  if (!isConfigured) {
     throw new Error('Flickr SDK failed to initialize');
   }
 }
 
-// Main handler for API route
-export default async function handler(req, res) {
-  // Set security headers
+// Main Vercel function handler
+module.exports = async (req, res) => {
+  // Security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Health check with enhanced success message
+  // Health check
   if (req.method === 'GET') {
     try {
       validateEnvironment();
       
       return res.status(200).json({
         status: '🎉 FLICKR UPLOADER LIVE!',
-        message: 'Production Flickr Photo Uploader Successfully Deployed & Configured',
+        message: 'Production Flickr Photo Uploader - Fully Configured',
         service: 'Flickr Photo Uploader',
         version: '1.0.0',
         deployment: 'SUCCESS ✅',
         configured: '✅ READY',
         features: [
-          '📸 Private photo uploads',
-          '📁 Smart album management', 
-          '🔒 Rate limiting & retry logic',
-          '⚡ Optimized for Make.com'
+          '📸 Private photo uploads via Flickr API',
+          '📁 Smart album management with duplicate prevention', 
+          '🔒 Rate limiting (3600 requests/hour)',
+          '⚡ Optimized for Make.com integration',
+          '🛡️ Retry logic with exponential backoff'
         ],
         endpoints: {
           health: 'GET /api',
           upload: 'POST /api'
+        },
+        flickrApi: {
+          sdk: 'flickr-sdk v7.0.0-beta.9',
+          methods: ['photosets.getList', 'photosets.create', 'photosets.addPhoto', 'upload'],
+          rateLimit: '3600 requests/hour'
         },
         timestamp: new Date().toISOString(),
         rateLimit: {
@@ -336,7 +319,7 @@ export default async function handler(req, res) {
     } catch (error) {
       return res.status(200).json({
         status: '⚠️ DEPLOYED BUT NOT CONFIGURED',
-        message: 'App deployed successfully but missing environment variables',
+        message: 'App deployed successfully but missing Flickr API credentials',
         service: 'Flickr Photo Uploader',
         version: '1.0.0',
         deployment: 'SUCCESS ✅',
@@ -345,17 +328,22 @@ export default async function handler(req, res) {
         timestamp: new Date().toISOString(),
         action: 'Add Flickr API credentials to Vercel environment variables',
         needed: [
-          'FLICKR_API_KEY',
-          'FLICKR_API_SECRET',
-          'FLICKR_ACCESS_TOKEN', 
-          'FLICKR_ACCESS_SECRET',
-          'FLICKR_USER_ID'
-        ]
+          'FLICKR_API_KEY (from Flickr App)',
+          'FLICKR_API_SECRET (from Flickr App)',
+          'FLICKR_ACCESS_TOKEN (OAuth token)', 
+          'FLICKR_ACCESS_SECRET (OAuth token secret)',
+          'FLICKR_USER_ID (your Flickr user ID)'
+        ],
+        setup: {
+          flickrApp: 'https://www.flickr.com/services/apps/create/',
+          apiDocs: 'https://www.flickr.com/services/api/',
+          sdkDocs: 'https://www.npmjs.com/package/flickr-sdk'
+        }
       });
     }
   }
 
-  // Handle upload requests
+  // Upload endpoint
   if (req.method === 'POST') {
     const startTime = Date.now();
     
@@ -364,7 +352,6 @@ export default async function handler(req, res) {
       
       const { imageUrl, dropboxUrl, albumPath, title, description } = req.body;
 
-      // Input validation
       const sourceUrl = dropboxUrl || imageUrl;
       if (!sourceUrl) {
         return res.status(400).json({ 
@@ -375,12 +362,12 @@ export default async function handler(req, res) {
       
       if (!albumPath) {
         return res.status(400).json({ 
-          error: 'Missing required field: albumPath',
+          error: 'Missing required field: albumPath (format: "Event/Album")',
           timestamp: new Date().toISOString()
         });
       }
 
-      // Validate URL format
+      // Validate URL
       try {
         new URL(sourceUrl);
       } catch {
@@ -390,7 +377,7 @@ export default async function handler(req, res) {
         });
       }
 
-      // Parse album path
+      // Parse album path (your original format)
       const parts = albumPath.split('/').filter(Boolean);
       if (parts.length === 0) {
         return res.status(400).json({ 
@@ -403,18 +390,17 @@ export default async function handler(req, res) {
       const albumName = parts[1] || 'General';
       const albumTitle = `${eventName} -- ${albumName}`;
 
-      // Generate title from URL if not provided
       const photoTitle = title || parse(sourceUrl).name || `Photo_${Date.now()}`;
       
       console.log(`Processing upload: ${photoTitle} -> ${albumTitle}`);
 
-      // Perform upload
+      // Perform Flickr upload
       const result = await uploadPhotoFromUrl(sourceUrl, photoTitle, albumTitle);
       
       const duration = Date.now() - startTime;
       console.log(`Upload completed in ${duration}ms`);
 
-      // Return success response in expected format
+      // Return success in your original format
       res.status(200).json({
         message: 'Photo uploaded successfully',
         result: {
@@ -430,7 +416,6 @@ export default async function handler(req, res) {
       const duration = Date.now() - startTime;
       console.error(`Upload failed after ${duration}ms:`, error);
       
-      // Determine appropriate HTTP status code
       let statusCode = 500;
       if (error.message.includes('Rate limit exceeded')) {
         statusCode = 429;
@@ -453,4 +438,4 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString()
     });
   }
-}
+};
